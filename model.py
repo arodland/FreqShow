@@ -56,8 +56,9 @@ class FreqShowModel(object):
 
                 self.set_freq_correction(0)  # (58ppm for unenhanced)can run test to determine this value, via regular antenna, not IF frequency!
 		self.set_swap_iq(True)   
-                self.set_sample_rate(.230)  # in MHz, must be within (.225001 <= sample_rate_mhz <= .300000) OR (.900001 <= sample_rate_mhz <= 3.200000)
-                self.set_zoom_fac(.05)   # equal to the frequency span you want to display on the screen in MHz
+		self.set_sample_rate(.230)  # in MHz, must be within (.225001 <= sample_rate_mhz <= .300000) OR (.900001 <= sample_rate_mhz <= 3.200000)
+		self.set_decimate(1)
+		self.set_zoom_fac(.05)   # equal to the frequency span you want to display on the screen in MHz
 		self.set_lo_offset(0.03) # Local Oscillator offset in MHz, slide the DC spike out of the window by this amount.
 		self.set_center_freq(70.451500)
  		self.set_gain('AUTO')
@@ -67,9 +68,6 @@ class FreqShowModel(object):
 		self.set_kaiser_beta(8.6)
 		self.set_peak(True)   # Set true for peaks, set False for averaging. 	
 		self.set_filter('nuttall') # set default windowing filter.
-
-		self.buff = np.array([0]*freqshow.SDR_SAMPLE_SIZE, np.complex64)
-
 
 	def _clear_intensity(self):
 		if self.min_auto_scale:
@@ -112,7 +110,7 @@ class FreqShowModel(object):
 
 	def set_center_freq(self, value):
 		self.center_freq  = (value)
-		if ((self.get_sample_rate()/self.get_zoom_fac())/2)>((self.get_lo_offset()/self.get_zoom_fac())-(self.get_zoom_fac()/2)):
+		if ((self.get_eff_sample_rate()/self.get_zoom_fac())/2)>((self.get_lo_offset()/self.get_zoom_fac())-(self.get_zoom_fac()/2)):
 			freq_hz = float((self.get_center_freq() + self.get_lo_offset())*1000000)
 		else:
 			freq_hz = float(self.get_center_freq()*1000000)
@@ -147,6 +145,20 @@ class FreqShowModel(object):
 			# Error setting value, ignore it for now but in the future consider
 			# adding an error message dialog.
 			pass
+
+	def get_decimate(self):
+		return self.decimate
+
+	def set_decimate(self, decimate_factor):
+		if decimate_factor is None or decimate_factor == 0:
+			self.decimate = 1
+		else:
+			self.decimate = int(decimate_factor)
+
+		self.buff = np.array([0]*(freqshow.SDR_SAMPLE_SIZE * self.decimate), np.complex64)
+
+	def get_eff_sample_rate(self):
+		return self.get_sample_rate() / self.get_decimate()
 
 	def get_gain(self):
 		"""Return gain of tuner.  Can be either the string 'AUTO' or a numeric
@@ -267,12 +279,14 @@ class FreqShowModel(object):
 
 
 	def get_freq_step(self):
-		if self.zoom_fac < (self.get_sample_rate()):
-			zoom = int(self.width*((self.get_sample_rate())/self.zoom_fac))
+		eff_sample_rate = self.get_eff_sample_rate()
+
+		if self.zoom_fac < eff_sample_rate:
+			zoom = int(self.width*((eff_sample_rate)/self.zoom_fac))
 		else:
-                        zoom = self.width
-                        self.zoom_fac = self.get_sample_rate()		
-		freq_step = self.get_sample_rate() * 1e6 / (zoom+2)
+			zoom = self.width
+			self.zoom_fac = eff_sample_rate
+		freq_step = eff_sample_rate * 1e6 / (zoom+2)
 		return freq_step
 
 
@@ -285,22 +299,27 @@ class FreqShowModel(object):
 		# the same as the display width.  Add two because there will be mean/DC
 		# values in the results which are ignored. Increase by 1/self.zoom_fac if needed		
 		
+		eff_sample_rate = self.get_eff_sample_rate()
 
-		if self.zoom_fac < (self.get_sample_rate()):
-			zoom = int(self.width*((self.get_sample_rate())/self.zoom_fac))
+		if self.zoom_fac < eff_sample_rate:
+			zoom = int(self.width*(eff_sample_rate)/self.zoom_fac)
 		else:
 			zoom = self.width
-			self.zoom_fac = self.get_sample_rate()
+			self.zoom_fac = eff_sample_rate
 
 		self.sdr.readStream(self.rxstream, [self.buff], len(self.buff))
 
-		if zoom < freqshow.SDR_SAMPLE_SIZE:		
-			freqbins = self.buff[0:zoom+2]
-		else:
+		if zoom >= freqshow.SDR_SAMPLE_SIZE:		
 			zoom = self.width
-			self.zoom_fac = self.get_sample_rate()
-			freqbins = self.buff[0:zoom+2]
+			self.zoom_fac = eff_sample_rate
 
+
+		freqbins = self.buff
+		decimate = self.get_decimate()
+		if decimate > 1:
+			freqbins = freqbins.reshape(-1, decimate).mean(axis=1)
+
+		freqbins = freqbins[0:zoom+2]
 
 		# Apply a window function to the sample to remove power in sample sidebands before the fft.
 	
