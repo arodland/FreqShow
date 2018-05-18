@@ -156,6 +156,7 @@ class FreqShowModel(object):
 			self.decimate = int(decimate_factor)
 
 		self.buff = np.array([0]*(freqshow.SDR_SAMPLE_SIZE * self.decimate), np.complex64)
+		self.window = None
 
 	def get_eff_sample_rate(self):
 		return self.get_sample_rate() / self.get_decimate()
@@ -252,6 +253,7 @@ class FreqShowModel(object):
 
 	def set_zoom_fac(self, zoom_fac):
 		self.zoom_fac = float(zoom_fac)
+		self.window = None
 
 
 	def get_sig_strength(self):
@@ -268,7 +270,7 @@ class FreqShowModel(object):
 
 	def set_filter(self, filter): 
 		self.filter = filter
-
+		self.window = None
 
 	def get_kaiser_beta(self):
 		return self.kaiser_beta
@@ -276,6 +278,7 @@ class FreqShowModel(object):
 
 	def set_kaiser_beta(self, kaiser_beta):
 		self.kaiser_beta = float(kaiser_beta)
+		self.window = None
 
 
 	def get_freq_step(self):
@@ -288,6 +291,30 @@ class FreqShowModel(object):
 			self.zoom_fac = eff_sample_rate
 		freq_step = eff_sample_rate * 1e6 / (zoom+2)
 		return freq_step
+
+	def recompute_window(self):
+		zoom = int(self.width*(self.get_eff_sample_rate())/self.zoom_fac)
+
+		if self.filter == 'kaiser':
+			self.window = signal.kaiser(freqshow.SDR_SAMPLE_SIZE, self.kaiser_beta, False,)[0:zoom+2]  # for every bin there is a window the same exact size as the read samples.
+		elif self.filter == 'boxcar':
+			self.window = signal.boxcar(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'hann':
+			self.window = signal.hann(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]	
+		elif self.filter == 'hamming':
+			self.window = signal.hamming(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'blackman':
+			self.window = signal.blackman(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'blackmanharris':
+			self.window = signal.blackmanharris(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'bartlett':
+			self.window = signal.bartlett(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'barthann':
+			self.window = signal.barthann(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		elif self.filter == 'nuttall':
+			self.window = signal.nuttall(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
+		else:
+			self.window = 1
 
 
 	def get_data(self):
@@ -306,13 +333,17 @@ class FreqShowModel(object):
 		else:
 			zoom = self.width
 			self.zoom_fac = eff_sample_rate
+			self.window = None
 
 		self.sdr.readStream(self.rxstream, [self.buff], len(self.buff))
 
 		if zoom >= freqshow.SDR_SAMPLE_SIZE:		
 			zoom = self.width
 			self.zoom_fac = eff_sample_rate
+			self.window = None
 
+		if self.window is None:
+			self.recompute_window()
 
 		freqbins = self.buff
 		decimate = self.get_decimate()
@@ -323,28 +354,7 @@ class FreqShowModel(object):
 
 		# Apply a window function to the sample to remove power in sample sidebands before the fft.
 	
-		if self.filter == 'kaiser':
-			window = signal.kaiser(freqshow.SDR_SAMPLE_SIZE, self.kaiser_beta, False,)[0:zoom+2]  # for every bin there is a window the same exact size as the read samples.
-		elif self.filter == 'boxcar':
-			window = signal.boxcar(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'hann':
-                        window = signal.hann(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]	
-                elif self.filter == 'hamming':
-                        window = signal.hamming(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'blackman':
-                        window = signal.blackman(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'blackmanharris':
-                        window = signal.blackmanharris(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'bartlett':
-                        window = signal.bartlett(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'barthann':
-                        window = signal.barthann(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-                elif self.filter == 'nuttall':
-                        window = signal.nuttall(freqshow.SDR_SAMPLE_SIZE, False,)[0:zoom+2]
-		else:
-			window = 1
-
-		samples = freqbins * window
+		samples = freqbins * self.window
 
 		# Run an FFT and take the absolute value to get frequency magnitudes.		
 		freqs = np.absolute(fft(samples))
