@@ -26,6 +26,7 @@
 import numpy as np
 from scipy import signal
 from scipy.fftpack import fft, rfft, fftshift
+import time
 
 import SoapySDR
 from SoapySDR import *
@@ -68,6 +69,8 @@ class FreqShowModel(object):
 		self.set_kaiser_beta(8.6)
 		self.set_peak(True)   # Set true for peaks, set False for averaging. 	
 		self.set_filter('nuttall') # set default windowing filter.
+
+		self.target_time = 0
 
 	def _clear_intensity(self):
 		if self.min_auto_scale:
@@ -327,6 +330,18 @@ class FreqShowModel(object):
 		# values in the results which are ignored. Increase by 1/self.zoom_fac if needed		
 		
 		eff_sample_rate = self.get_eff_sample_rate()
+
+		time_per_frame = float(freqshow.SDR_SAMPLE_SIZE) / (eff_sample_rate * 1e6)
+		now = time.time()
+		wait = self.target_time - now + 0.5 * time_per_frame
+
+		if wait > 0:
+			time.sleep(wait)
+
+		if self.target_time < now - 5 * time_per_frame:
+			self.target_time = now
+		else:
+			self.target_time += time_per_frame
 
 		if self.zoom_fac < eff_sample_rate:
 			zoom = int(self.width*(eff_sample_rate)/self.zoom_fac)
