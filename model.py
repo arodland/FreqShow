@@ -27,7 +27,8 @@ import numpy as np
 from scipy import signal
 from scipy.fftpack import fft, rfft, fftshift
 
-from rtlsdr import *
+import SoapySDR
+from SoapySDR import *
 
 import freqshow
 
@@ -49,7 +50,10 @@ class FreqShowModel(object):
 		self.set_max_intensity(50)
 
 		# Initialize RTL-SDR library.
-		self.sdr = RtlSdr()
+		self.sdr = SoapySDR.Device(dict(driver="rtlsdr"))
+		self.rxstream = self.sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
+		self.sdr.activateStream(self.rxstream)
+
                 self.set_freq_correction(0)  # (58ppm for unenhanced)can run test to determine this value, via regular antenna, not IF frequency!
 		self.set_swap_iq(True)   
                 self.set_sample_rate(.230)  # in MHz, must be within (.225001 <= sample_rate_mhz <= .300000) OR (.900001 <= sample_rate_mhz <= 3.200000)
@@ -63,6 +67,8 @@ class FreqShowModel(object):
 		self.set_kaiser_beta(8.6)
 		self.set_peak(True)   # Set true for peaks, set False for averaging. 	
 		self.set_filter('nuttall') # set default windowing filter.
+
+		self.buff = np.array([0]*freqshow.SDR_SAMPLE_SIZE, np.complex64)
 
 
 	def _clear_intensity(self):
@@ -92,7 +98,6 @@ class FreqShowModel(object):
 
 	def set_freq_correction(self, freq_correction):
 		self.freq_correction = (freq_correction)
-		self.sdr.set_freq_correction(int(freq_correction+1))
 
         def get_lo_offset(self):
                 return (self.lo_offset)
@@ -111,7 +116,10 @@ class FreqShowModel(object):
 			freq_hz = float((self.get_center_freq() + self.get_lo_offset())*1000000)
 		else:
 			freq_hz = float(self.get_center_freq()*1000000)
-		self.sdr.set_center_freq(float(freq_hz))
+
+		freq_hz += freq_hz * self.get_freq_correction()/1000000
+
+		self.sdr.setFrequency(SOAPY_SDR_RX, 0, float(freq_hz))
 		self._clear_intensity()
 
 	def get_lo_freq(self):
@@ -130,19 +138,15 @@ class FreqShowModel(object):
 
 	def get_sample_rate(self):
 		"""Return sample rate of tuner in megahertz."""
-		return self.sdr.get_sample_rate()/1000000.0
+		return self.sdr.getSampleRate(SOAPY_SDR_RX, 0)/1000000.0
 
 	def set_sample_rate(self, sample_rate_mhz):
-		"""Set tuner sample rate to provided frequency in megahertz."""
-		if .225001 <= sample_rate_mhz <= .300000 or .900001 <= sample_rate_mhz <= 3.200000:
- 			try:
-				self.sdr.set_sample_rate(sample_rate_mhz*1000000.0)
-			except IOError:
-				# Error setting value, ignore it for now but in the future consider
-				# adding an error message dialog.
-				pass
-		else:
-			self.sample_rate = self.get_sample_rate()			
+		try:
+			self.sdr.setSampleRate(SOAPY_SDR_RX, 0, sample_rate_mhz*1000000.0)
+		except IOError:
+			# Error setting value, ignore it for now but in the future consider
+			# adding an error message dialog.
+			pass
 
 	def get_gain(self):
 		"""Return gain of tuner.  Can be either the string 'AUTO' or a numeric
@@ -151,19 +155,20 @@ class FreqShowModel(object):
 		if self.auto_gain:
 			return 'AUTO'
 		else:
-			return '{0:0.1f}'.format(self.sdr.get_gain())
+			return '{0:0.1f}'.format(self.sdr.getGain(SOAPY_SDR_RX, 0))
 
 	def set_gain(self, gain_db):
 		"""Set gain of tuner.  Can be the string 'AUTO' for automatic gain
 		or a numeric value in decibels for fixed gain.
 		"""
 		if gain_db == 'AUTO':
-			self.sdr.set_manual_gain_enabled(False)
+			self.sdr.setGainMode(SOAPY_SDR_RX, 0, True)
 			self.auto_gain = True
 			self._clear_intensity()
 		else:
 			try:
-				self.sdr.set_gain(float(gain_db))
+				self.sdr.setGainMode(SOAPY_SDR_RX, 0, False)
+				self.sdr.setGain(SOAPY_SDR_RX, 0, float(gain_db))
 				self.auto_gain = False
 				self._clear_intensity()
 			except IOError:
@@ -262,12 +267,12 @@ class FreqShowModel(object):
 
 
 	def get_freq_step(self):
-		if self.zoom_fac < (self.sdr.sample_rate/1000000):
-                        zoom = int(self.width*((self.sdr.sample_rate/1000000)/self.zoom_fac))
-                else:
+		if self.zoom_fac < (self.get_sample_rate()):
+			zoom = int(self.width*((self.get_sample_rate())/self.zoom_fac))
+		else:
                         zoom = self.width
                         self.zoom_fac = self.get_sample_rate()		
-		freq_step = self.sdr.sample_rate/(zoom+2)
+		freq_step = self.get_sample_rate() * 1e6 / (zoom+2)
 		return freq_step
 
 
@@ -281,18 +286,20 @@ class FreqShowModel(object):
 		# values in the results which are ignored. Increase by 1/self.zoom_fac if needed		
 		
 
-		if self.zoom_fac < (self.sdr.sample_rate/1000000):
-			zoom = int(self.width*((self.sdr.sample_rate/1000000)/self.zoom_fac))
+		if self.zoom_fac < (self.get_sample_rate()):
+			zoom = int(self.width*((self.get_sample_rate())/self.zoom_fac))
 		else:
 			zoom = self.width
 			self.zoom_fac = self.get_sample_rate()
 
+		self.sdr.readStream(self.rxstream, [self.buff], len(self.buff))
+
 		if zoom < freqshow.SDR_SAMPLE_SIZE:		
-			freqbins = self.sdr.read_samples(freqshow.SDR_SAMPLE_SIZE)[0:zoom+2]
+			freqbins = self.buff[0:zoom+2]
 		else:
 			zoom = self.width
 			self.zoom_fac = self.get_sample_rate()
-			freqbins = self.sdr.read_samples(freqshow.SDR_SAMPLE_SIZE)[0:zoom+2]
+			freqbins = self.buff[0:zoom+2]
 
 
 		# Apply a window function to the sample to remove power in sample sidebands before the fft.
@@ -341,8 +348,7 @@ class FreqShowModel(object):
                 	extra_samples = int((freqs.size - self.width)/2)  # The excess samples either side of the display width in pixels.
 
                 	if extra_samples > abs(shiftsweep): # check if there is room to shift the array by the LO offset.
-
-                        	if self.get_swap_iq() == True:
+				if self.get_swap_iq() == True:
                                 	lextra = extra_samples + shiftsweep
                         	elif self.get_swap_iq() == False:
                                 	lextra = extra_samples - shiftsweep
