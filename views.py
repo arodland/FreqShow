@@ -616,7 +616,7 @@ class SpectrogramBase(ViewBase):
 		self.buttons.add(2, 0, 'PANADAPTER', click=self.controller.toggle_main, colspan=1)
 		self.buttons.add(4, 0, 'Quit', click=self.quit_click,
 			bg_color=freqshow.MAIN_BG)
-		self.overlay_enabled = True
+		self.overlay_enabled = False
 
         def scale_up(self, button):
                 if self.model.get_min_string() == 'AUTO' or self.model.get_max_string() == 'AUTO':
