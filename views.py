@@ -66,16 +66,9 @@ def gradient_func(colors):
 			return rgb_lerp(x, 0.0, 1.0, c0, c1)
 	return _fun
 
-def clamp(x, x0, x1):
-	"""Clamp a provided value to be between x0 and x1 (inclusive).  If value is
-	outside the range it will be truncated to the min/max value which is closest.
-	"""
-	if x > x1:
-		return x1
-	elif x < x0:
-		return x0
-	else:
-		return x
+def gradient_table(colors):
+	func = gradient_func(colors)
+	return [ func(float(x) / 255.0) for x in range(256) ]
 
 
 class ViewBase(object):
@@ -794,8 +787,9 @@ class WaterfallSpectrogram(SpectrogramBase):
 
 	def __init__(self, model, controller):
 		super(WaterfallSpectrogram, self).__init__(model, controller)
-		self.color_func = gradient_func(freqshow.WATERFALL_GRAD)
-		self.waterfall = pygame.Surface((model.width, model.height))
+		self.waterfall = pygame.Surface((model.width, model.height), depth=8)
+		color_table = gradient_table(freqshow.WATERFALL_GRAD)
+		self.waterfall.set_palette(color_table)
 
 	def clear_waterfall(self):
 		self.waterfall.fill(freqshow.MAIN_BG)
@@ -806,18 +800,17 @@ class WaterfallSpectrogram(SpectrogramBase):
 		# Scroll up the waterfall display.
 		self.waterfall.scroll(0, -1)
 		# Scale the FFT values to the range 0 to 1.
-		freqs = (freqs-self.model.min_intensity)/self.model.range
+		freqs = 255.0 * (freqs-self.model.min_intensity)/self.model.range
+
 		# Convert scaled values to pixels drawn at the bottom of the display.
 		x, y, width, height = screen.get_rect()
 		wx, wy, wwidth, wheight = self.waterfall.get_rect()
 		offset = wheight - height
 		# Draw FFT values mapped through the gradient function to a color.
-		self.waterfall.lock()
+		sa = pygame.surfarray.pixels2d(self.waterfall)
+		sa[:,-1] = freqs
+		del sa
 
-		for i in range(width):
-			power = clamp(freqs[i], 0.0, 1.0)
-			self.waterfall.set_at((i, wheight-1), self.color_func(power))
-		self.waterfall.unlock()
 		screen.blit(self.waterfall, (0, 0), area=(0, offset, width, height))
 		
 class InstantSpectrogram(SpectrogramBase):
