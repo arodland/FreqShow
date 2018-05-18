@@ -70,9 +70,9 @@ CENTER_LINE    = ( 125, 0,   0) # Red
 BLACK	       = (   0, 0,   0) # Black
 LINE_SHADOW      = (  96, 96, 96) # Medium Grey
 
-# Define gradient of colors for the waterfall graph.  Gradient goes from blue to
-# yellow to cyan to red.
-WATERFALL_GRAD = [(0, 0, 255), (0, 255, 255), (255, 255, 0), (255, 0, 0)]
+# Define gradient of colors for the waterfall graph.  Gradient goes from black to blue to cyan
+# to yellow to red to white.
+WATERFALL_GRAD = [(0, 0, 0), (0, 0, 70), (0, 0, 140), (60, 125, 255), (255, 255, 0), (255, 0, 0), (255, 255, 255)]
 
 # Configure default UI and button values.
 ui.MAIN_FONT = MAIN_FONT
