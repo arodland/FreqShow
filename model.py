@@ -219,10 +219,7 @@ class FreqShowModel(object):
 
 
 	def set_fft_ave(self, fft_ave):
-		if fft_ave > 1:
-			self.fft_ave = int(fft_ave)
-		else:
-			self.fft_ave = self.get_fft_ave
+		self.fft_ave = int(fft_ave)
 
 	def get_tune_rate(self):
 		return self.tune_rate
